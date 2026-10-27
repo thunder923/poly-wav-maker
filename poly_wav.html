@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Poly WAV メーカー（パラWAV → Poly WAV）</title>
+<style>
+  body{font-family:-apple-system,"Hiragino Sans",sans-serif;margin:0;background:#111;color:#eee}
+  main{max-width:720px;margin:0 auto;padding:20px 16px 48px}
+  h1{font-size:20px} .sub{color:#aaa;font-size:13px;line-height:1.6}
+  #drop{border:2px dashed #555;border-radius:14px;padding:28px 16px;text-align:center;margin:16px 0;background:#1a1a1a}
+  #drop.over{border-color:#ffd60a}
+  label.btn{display:inline-block;background:#ffd60a;color:#111;font-weight:700;padding:12px 18px;border-radius:10px;margin:4px}
+  .opts{background:#1a1a1a;border-radius:12px;padding:12px 16px;font-size:14px;line-height:2}
+  button#go{background:#ffd60a;color:#111;font-weight:700;font-size:16px;border:0;padding:14px 22px;border-radius:10px;width:100%;margin-top:14px}
+  button#go:disabled{opacity:.4}
+  #log{white-space:pre-wrap;font-size:13px;background:#000;border-radius:10px;padding:12px;margin-top:14px;min-height:60px}
+  a.dl{display:block;background:#2c2c2e;color:#ffd60a;padding:12px;border-radius:10px;margin-top:8px;text-align:center;text-decoration:none;font-weight:700}
+</style>
+</head>
+<body>
+<main>
+  <h1>⚡ Poly WAV メーカー</h1>
+  <p class="sub">ZOOM H6e などのパラWAV（<i>ZOOM0001_Tr1.WAV / _Tr2.WAV / _LR.WAV</i> …）を
+  1つの Polyphonic WAV に結合します。波形はバイト単位でそのままインターリーブするため
+  <b>32-bit float / 24-bit / 16-bit を完全維持（再量子化なし）</b>。bext / iXML も引き継ぎます。
+  ファイルは端末の外に送信されません（このページ内だけで処理します）。</p>
+
+  <div id="drop">
+    ここにフォルダ / WAVをドロップ（Mac / Windows / スマホ）<br>
+    複数のフォルダを投げても、フォルダごとに1ファイルずつ別々に出力します<br>
+    <label class="btn">ファイルを選ぶ<input id="files" type="file" accept=".wav,.WAV,audio/wav,audio/x-wav" multiple hidden></label>
+    <label class="btn">フォルダを選ぶ<input id="dir" type="file" webkitdirectory hidden></label>
+  </div>
+
+  <div class="opts">
+    <label><input type="checkbox" id="incMix"> *_Mix.WAV（2MIX）も含める</label><br>
+    <label><input type="checkbox" id="lrFirst"> LR / XY を先頭に置く</label>
+  </div>
+  <button id="go" disabled>Poly WAV に変換する</button>
+  <div id="log">ファイルを選んでください。</div>
+  <div id="out"></div>
+</main>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const log=m=>{$("log").textContent+=m+"\n";};
+let picked=[]; // {file, dir} dir=所属フォルダパス (フォルダ単位の分離に使う)
+function dirOf(f){const p=f.webkitRelativePath||"";return p.includes("/")?p.slice(0,p.lastIndexOf("/")):"";}
+function addFiles(fl){for(const f of fl){if(/\.wav$/i.test(f.name))picked.push({file:f,dir:dirOf(f)});}refresh();}
+function refresh(){
+  $("go").disabled=!picked.length;
+  $("log").textContent=picked.length?picked.map(p=>(p.dir?p.dir+"/":"")+p.file.name).join("\n")+"\n→ 変換ボタンを押してください":"ファイルを選んでください。";
+}
+$("files").addEventListener("change",e=>addFiles(e.target.files));
+$("dir").addEventListener("change",e=>addFiles(e.target.files));
+const drop=$("drop");
+["dragover","dragenter"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
+async function traverse(entry,dir,out){
+  if(entry.isFile){const f=await new Promise(r=>entry.file(r));if(/\.wav$/i.test(f.name))out.push({file:f,dir});}
+  else if(entry.isDirectory){const rd=entry.createReader();
+    const readAll=async()=>{const es=await new Promise(r=>rd.readEntries(r));if(!es.length)return;
+      for(const e of es)await traverse(e,dir?dir+"/"+entry.name:entry.name,out);await readAll();};
+    await readAll();}
+}
+drop.addEventListener("drop",async e=>{
+  const items=e.dataTransfer.items, out=[];
+  if(items&&items.length&&items[0].webkitGetAsEntry){
+    for(const it of items){const en=it.webkitGetAsEntry();if(en)await traverse(en,"",out);}
+  }
+  if(out.length){picked.push(...out);refresh();}
+  else addFiles(e.dataTransfer.files);
+});
+
+const TRACK_RE=/^(.+?)_(Tr\d+(?:-\d+)?|LR|XY|MS|Mix)$/i;
+function labelOf(name){const m=name.replace(/\.wav$/i,"").match(TRACK_RE);if(!m)return null;
+  let lab=m[2]; lab=lab.toLowerCase().startsWith("tr")?"Tr"+lab.slice(2):lab.toUpperCase();
+  return {base:m[1],label:lab};}
+function sortKey(lab,lrFirst){const L=lab.toUpperCase();
+  if(L==="MIX")return[90,0]; if(["LR","XY","MS"].includes(L))return lrFirst?[0,0]:[50,0];
+  const m=L.match(/^TR(\d+)/); if(m)return[10,parseInt(m[1])]; return[60,0];}
+
+function u32(dv,o){return dv.getUint32(o,true);} function u16(dv,o){return dv.getUint16(o,true);}
+function parseWav(buf){
+  const dv=new DataView(buf), u8=new Uint8Array(buf);
+  if(new TextDecoder().decode(u8.slice(8,12))!=="WAVE")throw new Error("WAVではありません");
+  const info={chunks:{}}; let off=12;
+  while(off+8<=buf.byteLength){
+    const id=new TextDecoder().decode(u8.slice(off,off+4)), size=u32(dv,off+4), body=off+8;
+    if(id==="fmt "){info.rawFmt=u16(dv,body);info.channels=u16(dv,body+2);info.sr=u32(dv,body+4);
+      info.blockAlign=u16(dv,body+12);info.bits=u16(dv,body+14);info.fmt=info.rawFmt;
+      if(info.rawFmt===0xFFFE&&size>=40){info.validBits=u16(dv,body+18);info.fmt=u32(dv,body+24);}}
+    else if(id==="data"){info.dataOff=body;info.dataSize=size;}
+    else if(["bext","iXML"].includes(id))info.chunks[id]=u8.slice(body,body+size);
+    off=body+size+(size&1);
+  }
+  info.frames=Math.floor(info.dataSize/info.blockAlign);
+  info.bps=info.bits/8;
+  return info;
+}
+const GUID=t=>{const b=new Uint8Array(16),d=new DataView(b.buffer);d.setUint32(0,t,true);d.setUint16(4,0,true);d.setUint16(6,0x10,true);
+  b.set([0x80,0,0,0xAA,0,0x38,0x9B,0x71],8);return b;};
+const SPK=[1,2,4,8,16,32,64,128,256,512,1024,2048];
+function chunk(id,body){const o=new Uint8Array(8+body.length+(body.length&1));const d=new DataView(o.buffer);
+  o.set(new TextEncoder().encode(id),0);d.setUint32(4,body.length,true);o.set(body,8);return o;}
+function buildIxml(infos,names){
+  let root=null,tpl=null;
+  for(const inf of infos){if(!inf.chunks.iXML)continue;
+    try{root=new DOMParser().parseFromString(new TextDecoder().decode(inf.chunks.iXML).replace(/\0+$/,""),"text/xml");
+      const t=root.querySelector("TRACK_LIST TRACK"); if(t)tpl=t.cloneNode(true);}catch(e){}
+    if(root)break;}
+  if(!root||root.querySelector("parsererror")){root=new DOMParser().parseFromString("<BWFXML><IXML_VERSION>1.61</IXML_VERSION></BWFXML>","text/xml");}
+  let tl=root.querySelector("TRACK_LIST"); if(!tl){tl=root.createElement("TRACK_LIST");root.documentElement.appendChild(tl);}
+  tl.querySelectorAll("TRACK").forEach(t=>t.remove());
+  let cnt=tl.querySelector("COUNT"); if(!cnt){cnt=root.createElement("COUNT");tl.prepend(cnt);} cnt.textContent=String(names.length);
+  names.forEach((name,i)=>{const tr=tpl?tpl.cloneNode(true):root.createElement("TRACK");
+    const set=(tag,v)=>{let el=tr.querySelector(tag);if(!el){el=root.createElement(tag);tr.appendChild(el);}el.textContent=String(v);};
+    set("CHANNEL_INDEX",i+1);set("INTERLEAVE_INDEX",i+1);set("NAME",name);tl.appendChild(tr);});
+  return new TextEncoder().encode('<?xml version="1.0" encoding="UTF-8"?>\r\n'+new XMLSerializer().serializeToString(root));
+}
+function trackNames(inf){
+  if(!inf.chunks.iXML)return[];
+  try{const r=new DOMParser().parseFromString(new TextDecoder().decode(inf.chunks.iXML).replace(/\0+$/,""),"text/xml");
+    return[...r.querySelectorAll("TRACK_LIST TRACK")].map(t=>({i:parseInt(t.querySelector("CHANNEL_INDEX")?.textContent||"0"),n:(t.querySelector("NAME")?.textContent||"").trim()}))
+      .sort((a,b)=>a.i-b.i).map(t=>t.n);}catch(e){return[];}
+}
+function chanNames(inf){
+  // ステレオは必ず L / R の独立chとして扱う (例: LR → LR-L, LR-R)
+  const names=trackNames(inf).filter(Boolean);
+  if(inf.channels===1)return[names[0]||inf.label];
+  const sides=Array.from({length:inf.channels},(_,c)=>c===0?"L":c===1?"R":c+1);
+  if(names.length===inf.channels){
+    if(names.every(n=>["L","R",inf.label.toUpperCase()].includes(n.toUpperCase())))
+      return sides.map(s=>inf.label+"-"+s);
+    return names;}
+  const base=names[0]||inf.label; return sides.map(s=>base+"-"+s);
+}
+const mapText=names=>names.map((n,i)=>(i+1)+"="+n).join(", ");
+function patchBext(bext,names){
+  if(!bext||bext.length<256)return bext;
+  const out=bext.slice(); let desc=out.slice(0,256); const z=desc.indexOf(0); if(z>=0)desc=desc.slice(0,z);
+  let add=new TextEncoder().encode(" | PolyCH: "+mapText(names));
+  let d=desc; if(d.length+add.length>256)d=d.slice(0,256-add.length);
+  const nd=new Uint8Array(256); nd.set(d); nd.set(add,d.length); out.set(nd,0); return out;
+}
+function listInfo(names){
+  const t=new TextEncoder().encode("PolyWAV channels: "+mapText(names)+"\0");
+  const body=new Uint8Array(4+8+t.length); body.set(new TextEncoder().encode("INFO"),0);
+  body.set(new TextEncoder().encode("ICMT"),4); new DataView(body.buffer).setUint32(8,t.length,true); body.set(t,12);
+  return body;
+}
+async function convert(base,items){
+  const bufs=[];const infos=[];
+  for(const it of items){const b=await it.file.arrayBuffer();const inf=parseWav(b);inf.label=it.label;inf.buf=new Uint8Array(b);infos.push(inf);}
+  const ref=infos[0];
+  for(const inf of infos){if(inf.sr!==ref.sr||inf.bits!==ref.bits||inf.fmt!==ref.fmt)throw new Error("フォーマット不一致: "+inf.label);}
+  const totalCh=infos.reduce((a,i)=>a+i.channels,0), frames=Math.max(...infos.map(i=>i.frames));
+  const totalBlock=totalCh*ref.bps, dataBytes=frames*totalBlock;
+  const names=infos.flatMap(chanNames);
+  const data=new Uint8Array(dataBytes); let dest=0;
+  for(const inf of infos){const src=inf.buf;
+    for(let fr=0;fr<inf.frames;fr++)for(let c=0;c<inf.channels;c++){
+      data.set(src.subarray(inf.dataOff+fr*inf.blockAlign+c*ref.bps, inf.dataOff+fr*inf.blockAlign+(c+1)*ref.bps),
+               fr*totalBlock+(dest+c)*ref.bps);}
+    dest+=inf.channels;}
+  const useExt=totalCh>2||ref.rawFmt===0xFFFE||ref.fmt===3;
+  const fmtBody=new Uint8Array(useExt?40:16), fd=new DataView(fmtBody.buffer);
+  fd.setUint16(0,useExt?0xFFFE:ref.fmt,true);fd.setUint16(2,totalCh,true);fd.setUint32(4,ref.sr,true);
+  fd.setUint32(8,ref.sr*totalBlock,true);fd.setUint16(12,totalBlock,true);fd.setUint16(14,ref.bits,true);
+  if(useExt){fd.setUint16(16,22,true);fd.setUint16(18,ref.validBits||ref.bits,true);
+    let mask=0;SPK.slice(0,totalCh).forEach(b=>mask|=b);fd.setUint32(20,mask,true);fmtBody.set(GUID(ref.fmt),24);}
+  const parts=[chunk("fmt ",fmtBody)];
+  if(ref.fmt===3||useExt){const f=new Uint8Array(4);new DataView(f.buffer).setUint32(0,frames,true);parts.push(chunk("fact",f));}
+  const bext0=infos.map(i=>i.chunks.bext).find(Boolean); if(bext0)parts.push(chunk("bext",patchBext(bext0,names)));
+  parts.push(chunk("LIST",listInfo(names)));
+  parts.push(chunk("iXML",buildIxml(infos,names)));
+  parts.push(chunk("data",data));
+  const riffSize=4+parts.reduce((a,p)=>a+p.length,0);
+  const head=new Uint8Array(12),hd=new DataView(head.buffer);head.set(new TextEncoder().encode("RIFF"),0);
+  hd.setUint32(4,riffSize,true);head.set(new TextEncoder().encode("WAVE"),8);
+  return {blob:new Blob([head,...parts],{type:"audio/wav"}),totalCh,frames,names,ref};
+}
+$("go").addEventListener("click",async()=>{
+  $("out").innerHTML="";$("log").textContent="";
+  const incMix=$("incMix").checked, lrFirst=$("lrFirst").checked;
+  const groups={};
+  for(const pk of picked){const p=labelOf(pk.file.name);
+    if(!p){log("⚠ 命名規則外のためスキップ: "+pk.file.name);continue;}
+    if(p.label.toUpperCase()==="MIX"&&!incMix)continue;
+    const key=(pk.dir||"")+"|"+p.base.toLowerCase(); // フォルダ+テイク名で分離 (同名でも混ぜない)
+    (groups[key]=groups[key]||{base:p.base,dir:pk.dir,items:[]}).items.push({file:pk.file,label:p.label});}
+  const keys=Object.keys(groups);
+  if(!keys.length){log("対象テイクがありません。");return;}
+  const baseCount={}; keys.forEach(k=>{const b=groups[k].base.toLowerCase();baseCount[b]=(baseCount[b]||0)+1;});
+  for(const k of keys){const g=groups[k];
+    g.items.sort((a,b)=>{const x=sortKey(a.label,lrFirst),y=sortKey(b.label,lrFirst);return x[0]-y[0]||x[1]-y[1];});
+    const dup=baseCount[g.base.toLowerCase()]>1;
+    const dlName=(dup&&g.dir?g.dir.split("/").pop()+"_":"")+g.base+"_POLY.wav";
+    try{const r=await convert(g.base,g.items);
+      log(`✅ ${g.dir?g.dir+"/":""}${g.base}: ${r.totalCh}ch / ${r.ref.sr}Hz / ${r.ref.bits}bit ${r.ref.fmt===3?"float":"PCM"}\n   ch割当: ${mapText(r.names)}`);
+      const a=document.createElement("a");a.className="dl";a.textContent="⬇ "+dlName+" を保存";
+      a.href=URL.createObjectURL(r.blob);a.download=dlName;$("out").appendChild(a);
+    }catch(e){log("✗ "+g.base+": "+e.message);}
+  }
+});
+</script>
+</body>
+</html>
