@@ -16,6 +16,16 @@
   button#go:disabled{opacity:.4}
   #log{white-space:pre-wrap;font-size:13px;background:#000;border-radius:10px;padding:12px;margin-top:14px;min-height:60px}
   a.dl{display:block;background:#2c2c2e;color:#ffd60a;padding:12px;border-radius:10px;margin-top:8px;text-align:center;text-decoration:none;font-weight:700}
+  .upm-linkrow{text-align:center;margin-top:22px;font-size:13px}
+  .upm-linkrow a{color:#ffd60a}
+  .upm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:9999;padding:16px}
+  .upm-overlay.open{display:flex}
+  .upm-box{background:#fff;color:#1a1a1a;border-radius:14px;max-width:640px;width:100%;max-height:85vh;overflow:auto;padding:20px;font-size:14px;line-height:1.7;text-align:left}
+  .upm-box h2{font-size:16px;margin:18px 0 6px}
+  .upm-box h2:first-of-type{margin-top:2px}
+  .upm-box p{font-size:13.5px;margin:6px 0}
+  .upm-box ul,.upm-box ol{padding-left:20px;margin:6px 0;font-size:13.5px}
+  .upm-close{float:right;background:#111;color:#fff;border:0;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -40,7 +50,27 @@
   <button id="go" disabled>Poly WAV に変換する</button>
   <div id="log">ファイルを選んでください。</div>
   <div id="out"></div>
+  <p class="upm-linkrow"><a href="#" id="upmLink">使い方・プライバシーポリシー</a></p>
 </main>
+<div class="upm-overlay" id="upmOverlay"><div class="upm-box">
+  <button class="upm-close" id="upmClose" type="button">閉じる</button>
+  <h2>使い方</h2>
+  <ol>
+    <li>WAVファイルをまとめて選ぶか、テイクフォルダを選んでください（この枠へのドラッグ＆ドロップでもOK）。</li>
+    <li>必要に応じてオプション（「*_Mix.WAV（2MIX）も含める」「LR / XY を先頭に置く」）を設定します。</li>
+    <li>「Poly WAV に変換する」を押すと、フォルダごとに <i>*_POLY.wav</i> が作られます。表示された保存リンクからダウンロードしてください。</li>
+  </ol>
+  <p>入力ファイルは読み取りのみで、変更されません。巨大なテイク（数GB）はメモリ不足になることがあります。その場合は Python 版（poly_wav.py）をお使いください。</p>
+  <h2>プライバシーポリシー</h2>
+  <ul>
+    <li>選択した音声ファイルは、すべてお使いの端末のブラウザ内だけで処理されます。ファイルが外部のサーバーへ送信されることはありません。</li>
+    <li>このページは、処理のための通信を行いません。アクセス解析・広告・Cookie による追跡もなく、設定や履歴が保存されることもありません。</li>
+    <li>Python 版も端末内だけで動作し、外部と通信しません。</li>
+  </ul>
+</div></div>
+<script>
+(function(){var o=document.getElementById('upmOverlay');var l=document.getElementById('upmLink');var c=document.getElementById('upmClose');if(l)l.addEventListener('click',function(e){e.preventDefault();o.classList.add('open')});if(c)c.addEventListener('click',function(){o.classList.remove('open')});if(o)o.addEventListener('click',function(e){if(e.target===o)o.classList.remove('open')})})();
+</script>
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
